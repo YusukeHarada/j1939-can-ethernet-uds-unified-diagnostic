@@ -6,7 +6,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from udsdiag.csvio import read_rows, write_rows
-from udsdiag.live import send_ethernet_udp, send_socketcan_raw
+from udsdiag.live import exchange_ethernet_udp, send_ethernet_udp, send_socketcan_raw
+from udsdiag.live import serve_ethernet_udp as run_ethernet_udp_server
 from udsdiag.transport import (
     ETHERNET_DEFAULT_HOST,
     ETHERNET_DEFAULT_PORT,
@@ -16,8 +17,8 @@ from udsdiag.transport import (
     decode_j1939,
     encode_ethernet,
     encode_j1939,
-    ethernet_from_row,
     ethernet_to_row,
+    ethernet_from_row,
     j1939_from_row,
     j1939_to_row,
 )
@@ -63,6 +64,15 @@ def build_parser() -> argparse.ArgumentParser:
         subparser.add_argument("--port", default=str(ETHERNET_DEFAULT_PORT))
         subparser.add_argument("--response-payload", default="")
         subparser.add_argument("--negative-response-code", default="0x11")
+        subparser.add_argument("--timeout", default="1.0")
+
+    serve_parser = subparsers.add_parser("serve")
+    serve_parser.add_argument("--transport", choices=["j1939", "ethernet"], required=True)
+    serve_parser.add_argument("--host", default=ETHERNET_DEFAULT_HOST)
+    serve_parser.add_argument("--port", default=str(ETHERNET_DEFAULT_PORT))
+    serve_parser.add_argument("--response-payload", default="")
+    serve_parser.add_argument("--negative-response-code", default="0x11")
+    serve_parser.add_argument("--max-messages", default="")
     return parser
 
 
@@ -107,15 +117,42 @@ def client_command(args: argparse.Namespace) -> int:
 
     port = parse_int(args.port, field="port", minimum=1, maximum=65535)
     ethernet_frames = [encode_ethernet(message, host=args.host, port=port) for message in messages]
+    output_frames = ethernet_frames
     if args.mode == "live":
+        timeout = parse_timeout(args.timeout)
+        response_frames = []
         for ethernet_frame in ethernet_frames:
-            send_ethernet_udp(ethernet_frame)
+            response_payload = exchange_ethernet_udp(ethernet_frame, timeout)
+            response_frames.append(
+                encode_ethernet(
+                    UdsMessage.from_payload(response_payload),
+                    host=args.host,
+                    port=port,
+                )
+            )
+        output_frames = response_frames
     write_rows(
         args.output,
-        (ethernet_to_row(ethernet_frame) for ethernet_frame in ethernet_frames),
+        (ethernet_to_row(ethernet_frame) for ethernet_frame in output_frames),
         ETHERNET_FIELDS,
     )
     return 0
+
+
+def parse_timeout(text: str) -> float:
+    try:
+        timeout = float(text)
+    except ValueError as exc:
+        raise DiagnosticError(f"timeout must be a number: {text}") from exc
+    if timeout <= 0:
+        raise DiagnosticError(f"timeout must be positive: {text}")
+    return timeout
+
+
+def parse_optional_count(text: str) -> int | None:
+    if not text.strip():
+        return None
+    return parse_int(text, field="max_messages", minimum=1, maximum=1_000_000)
 
 
 def receive_command(args: argparse.Namespace) -> int:
@@ -125,6 +162,36 @@ def receive_command(args: argparse.Namespace) -> int:
     else:
         messages = [decode_ethernet(ethernet_from_row(row)) for row in input_rows]
     write_rows(args.output, (uds_to_row(message) for message in messages), UDS_FIELDS)
+    return 0
+
+
+def serve_command(args: argparse.Namespace) -> int:
+    if args.transport != "ethernet":
+        raise DiagnosticError("serve currently supports ethernet transport only")
+    port = parse_int(args.port, field="port", minimum=1, maximum=65535)
+    response_payload = parse_hex_bytes(args.response_payload)
+    negative_response_code = parse_int(
+        args.negative_response_code,
+        field="negative_response_code",
+        minimum=0,
+        maximum=0xFF,
+    )
+
+    def handle_request(payload: bytes) -> bytes:
+        request = UdsMessage.from_payload(payload)
+        response = build_server_response(
+            request,
+            response_payload=response_payload,
+            negative_response_code=negative_response_code,
+        )
+        return response.to_payload()
+
+    run_ethernet_udp_server(
+        args.host,
+        port,
+        handle_request,
+        max_messages=parse_optional_count(args.max_messages),
+    )
     return 0
 
 
@@ -191,6 +258,8 @@ def run(args: argparse.Namespace) -> int:
         return client_command(args)
     if args.command == "server":
         return server_command(args)
+    if args.command == "serve":
+        return serve_command(args)
     if args.command == "receive":
         return receive_command(args)
     raise DiagnosticError(f"unknown command: {args.command}")

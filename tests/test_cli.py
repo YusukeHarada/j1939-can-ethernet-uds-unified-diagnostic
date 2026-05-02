@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import csv
 from argparse import Namespace
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from udsdiag.cli import main, run
+from udsdiag.transport import EthernetFrame
 from udsdiag.uds import DiagnosticError
 
 
@@ -258,6 +260,176 @@ def test_cli_server_rejects_invalid_negative_response_code(
     assert "negative_response_code out of range" in capsys.readouterr().err
 
 
+def test_cli_serve_ethernet_runs_udp_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_server(
+        host: str,
+        port: int,
+        handler: Callable[[bytes], bytes],
+        *,
+        max_messages: int | None,
+    ) -> int:
+        captured["host"] = host
+        captured["port"] = port
+        captured["max_messages"] = max_messages
+        captured["response"] = handler(b"\x22\xf1\x90")
+        return 1
+
+    monkeypatch.setattr("udsdiag.cli.run_ethernet_udp_server", fake_server)
+
+    assert (
+        main(
+            [
+                "serve",
+                "--transport",
+                "ethernet",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "13400",
+                "--response-payload",
+                "12 34",
+                "--max-messages",
+                "1",
+            ]
+        )
+        == 0
+    )
+    assert captured == {
+        "host": "127.0.0.1",
+        "port": 13400,
+        "max_messages": 1,
+        "response": b"\x62\xf1\x90\x12\x34",
+    }
+
+
+def test_cli_serve_ethernet_accepts_unlimited_messages(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_server(
+        host: str,
+        port: int,
+        handler: Callable[[bytes], bytes],
+        *,
+        max_messages: int | None,
+    ) -> int:
+        captured["max_messages"] = max_messages
+        captured["response"] = handler(b"\x22\xf1\x90")
+        return 1
+
+    monkeypatch.setattr("udsdiag.cli.run_ethernet_udp_server", fake_server)
+
+    assert main(["serve", "--transport", "ethernet"]) == 0
+    assert captured == {"max_messages": None, "response": b"\x62\xf1\x90"}
+
+
+def test_cli_serve_rejects_j1939(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["serve", "--transport", "j1939"]) == 1
+    assert "serve currently supports ethernet" in capsys.readouterr().err
+
+
+def test_cli_serve_rejects_invalid_max_messages(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["serve", "--transport", "ethernet", "--max-messages", "0"]) == 1
+    assert "max_messages out of range" in capsys.readouterr().err
+
+
+def test_cli_client_live_ethernet_captures_responses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uds = tmp_path / "uds.csv"
+    responses = tmp_path / "responses.csv"
+    uds.write_text("service_id,did,payload_hex\n0x22,0xF190,\n", encoding="utf-8")
+
+    monkeypatch.setattr("udsdiag.cli.exchange_ethernet_udp", lambda frame, timeout: b"\x62\xf1\x90")
+
+    assert (
+        main(
+            [
+                "client",
+                "--transport",
+                "ethernet",
+                "--input",
+                str(uds),
+                "--output",
+                str(responses),
+                "--mode",
+                "live",
+                "--timeout",
+                "0.5",
+            ]
+        )
+        == 0
+    )
+    assert rows(responses) == [
+        {
+            "protocol": "ethernet",
+            "host": "127.0.0.1",
+            "port": "13400",
+            "payload_hex": "62 F1 90",
+        }
+    ]
+
+
+def test_cli_client_live_ethernet_rejects_invalid_timeout(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    uds = tmp_path / "uds.csv"
+    output = tmp_path / "responses.csv"
+    uds.write_text("service_id,did,payload_hex\n0x22,0xF190,\n", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "client",
+                "--transport",
+                "ethernet",
+                "--input",
+                str(uds),
+                "--output",
+                str(output),
+                "--mode",
+                "live",
+                "--timeout",
+                "0",
+            ]
+        )
+        == 1
+    )
+    assert "timeout must be positive" in capsys.readouterr().err
+
+
+def test_cli_client_live_ethernet_rejects_non_numeric_timeout(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    uds = tmp_path / "uds.csv"
+    output = tmp_path / "responses.csv"
+    uds.write_text("service_id,did,payload_hex\n0x22,0xF190,\n", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "client",
+                "--transport",
+                "ethernet",
+                "--input",
+                str(uds),
+                "--output",
+                str(output),
+                "--mode",
+                "live",
+                "--timeout",
+                "soon",
+            ]
+        )
+        == 1
+    )
+    assert "timeout must be a number" in capsys.readouterr().err
+
+
 def test_cli_send_receive_ethernet(tmp_path: Path) -> None:
     uds = tmp_path / "uds.csv"
     frames = tmp_path / "frames.csv"
@@ -312,7 +484,12 @@ def test_cli_live_mode_calls_senders(tmp_path: Path, monkeypatch: pytest.MonkeyP
         "udsdiag.cli.send_socketcan_raw",
         lambda frame, interface: sent.append(interface),
     )
-    monkeypatch.setattr("udsdiag.cli.send_ethernet_udp", lambda frame: sent.append(frame.host))
+
+    def exchange_response(frame: EthernetFrame, timeout: float) -> bytes:
+        sent.append(frame.host)
+        return b"\x62\xf1\x90"
+
+    monkeypatch.setattr("udsdiag.cli.exchange_ethernet_udp", exchange_response)
 
     assert (
         main(
@@ -358,6 +535,7 @@ def test_cli_live_mode_calls_senders(tmp_path: Path, monkeypatch: pytest.MonkeyP
         "192.0.2.20",
         "192.0.2.20",
     ]
+    assert rows(ethernet_frames)[0]["payload_hex"] == "62 F1 90"
 
 
 def test_cli_returns_error_for_invalid_csv(
