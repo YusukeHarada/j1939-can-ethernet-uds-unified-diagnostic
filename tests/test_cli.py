@@ -276,7 +276,7 @@ def test_cli_serve_ethernet_runs_udp_server(monkeypatch: pytest.MonkeyPatch) -> 
         captured["response"] = handler(b"\x22\xf1\x90")
         return 1
 
-    monkeypatch.setattr("udsdiag.cli.run_ethernet_udp_server", fake_server)
+    monkeypatch.setattr("udsdiag.cli.serve_ethernet_udp", fake_server)
 
     assert (
         main(
@@ -318,7 +318,7 @@ def test_cli_serve_ethernet_accepts_unlimited_messages(monkeypatch: pytest.Monke
         captured["response"] = handler(b"\x22\xf1\x90")
         return 1
 
-    monkeypatch.setattr("udsdiag.cli.run_ethernet_udp_server", fake_server)
+    monkeypatch.setattr("udsdiag.cli.serve_ethernet_udp", fake_server)
 
     assert main(["serve", "--transport", "ethernet"]) == 0
     assert captured == {"max_messages": None, "response": b"\x62\xf1\x90"}

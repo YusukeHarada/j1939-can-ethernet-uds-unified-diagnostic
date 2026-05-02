@@ -6,8 +6,12 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from udsdiag.csvio import read_rows, write_rows
-from udsdiag.live import exchange_ethernet_udp, send_ethernet_udp, send_socketcan_raw
-from udsdiag.live import serve_ethernet_udp as run_ethernet_udp_server
+from udsdiag.live import (
+    exchange_ethernet_udp,
+    send_ethernet_udp,
+    send_socketcan_raw,
+    serve_ethernet_udp,
+)
 from udsdiag.transport import (
     ETHERNET_DEFAULT_HOST,
     ETHERNET_DEFAULT_PORT,
@@ -17,8 +21,8 @@ from udsdiag.transport import (
     decode_j1939,
     encode_ethernet,
     encode_j1939,
-    ethernet_to_row,
     ethernet_from_row,
+    ethernet_to_row,
     j1939_from_row,
     j1939_to_row,
 )
@@ -186,7 +190,7 @@ def serve_command(args: argparse.Namespace) -> int:
         )
         return response.to_payload()
 
-    run_ethernet_udp_server(
+    serve_ethernet_udp(
         args.host,
         port,
         handle_request,
