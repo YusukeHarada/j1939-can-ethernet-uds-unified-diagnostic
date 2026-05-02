@@ -38,7 +38,9 @@ def test_uds_message_round_trip_without_did_and_positive_status() -> None:
 
 
 def test_negative_response_status() -> None:
-    assert UdsMessage(service_id=0x7F, did=None, payload=b"\x22\x31").status() == "negative_response"
+    message = UdsMessage(service_id=0x7F, did=None, payload=b"\x22\x31")
+
+    assert message.status() == "negative_response"
 
 
 def test_validate_client_request() -> None:

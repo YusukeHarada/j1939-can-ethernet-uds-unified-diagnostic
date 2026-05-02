@@ -31,7 +31,10 @@ def test_cli_send_receive_j1939(tmp_path: Path) -> None:
     decoded = tmp_path / "decoded.csv"
     write_uds(uds)
 
-    assert main(["send", "--transport", "j1939", "--input", str(uds), "--output", str(frames)]) == 0
+    assert (
+        main(["send", "--transport", "j1939", "--input", str(uds), "--output", str(frames)])
+        == 0
+    )
     assert rows(frames)[0]["protocol"] == "j1939"
 
     assert (
@@ -55,7 +58,10 @@ def test_cli_client_j1939_accepts_client_requests(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    assert main(["client", "--transport", "j1939", "--input", str(uds), "--output", str(frames)]) == 0
+    assert (
+        main(["client", "--transport", "j1939", "--input", str(uds), "--output", str(frames)])
+        == 0
+    )
 
     frame_rows = rows(frames)
     assert frame_rows[0]["payload_hex"] == "22 F1 90"
@@ -69,7 +75,10 @@ def test_cli_client_rejects_non_client_service_id(
     frames = tmp_path / "frames.csv"
     uds.write_text("service_id,did,payload_hex\n0x7F,,22 31\n", encoding="utf-8")
 
-    assert main(["client", "--transport", "j1939", "--input", str(uds), "--output", str(frames)]) == 1
+    assert (
+        main(["client", "--transport", "j1939", "--input", str(uds), "--output", str(frames)])
+        == 1
+    )
     assert "not a supported UDS client request" in capsys.readouterr().err
 
 
@@ -100,7 +109,17 @@ def test_cli_send_receive_ethernet(tmp_path: Path) -> None:
     assert rows(frames)[0]["host"] == "192.0.2.10"
 
     assert (
-        main(["receive", "--transport", "ethernet", "--input", str(frames), "--output", str(decoded)])
+        main(
+            [
+                "receive",
+                "--transport",
+                "ethernet",
+                "--input",
+                str(frames),
+                "--output",
+                str(decoded),
+            ]
+        )
         == 0
     )
     assert rows(decoded)[0]["did"] == "0xF190"
@@ -113,7 +132,10 @@ def test_cli_live_mode_calls_senders(tmp_path: Path, monkeypatch: pytest.MonkeyP
     write_uds(uds)
     sent: list[str] = []
 
-    monkeypatch.setattr("udsdiag.cli.send_socketcan_raw", lambda frame, interface: sent.append(interface))
+    monkeypatch.setattr(
+        "udsdiag.cli.send_socketcan_raw",
+        lambda frame, interface: sent.append(interface),
+    )
     monkeypatch.setattr("udsdiag.cli.send_ethernet_udp", lambda frame: sent.append(frame.host))
 
     assert (
@@ -152,15 +174,28 @@ def test_cli_live_mode_calls_senders(tmp_path: Path, monkeypatch: pytest.MonkeyP
         )
         == 0
     )
-    assert sent == ["can1", "can1", "can1", "192.0.2.20", "192.0.2.20", "192.0.2.20"]
+    assert sent == [
+        "can1",
+        "can1",
+        "can1",
+        "192.0.2.20",
+        "192.0.2.20",
+        "192.0.2.20",
+    ]
 
 
-def test_cli_returns_error_for_invalid_csv(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_returns_error_for_invalid_csv(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     uds = tmp_path / "bad.csv"
     output = tmp_path / "out.csv"
     uds.write_text("service_id,did,payload_hex\n0x100,,\n", encoding="utf-8")
 
-    assert main(["send", "--transport", "j1939", "--input", str(uds), "--output", str(output)]) == 1
+    assert (
+        main(["send", "--transport", "j1939", "--input", str(uds), "--output", str(output)])
+        == 1
+    )
     assert "service_id out of range" in capsys.readouterr().err
 
 

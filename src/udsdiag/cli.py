@@ -21,9 +21,22 @@ from udsdiag.transport import (
     j1939_from_row,
     j1939_to_row,
 )
-from udsdiag.uds import DiagnosticError, UdsMessage, parse_int, uds_from_row, uds_to_row
+from udsdiag.uds import (
+    DiagnosticError,
+    UdsMessage,
+    parse_int,
+    uds_from_row,
+    uds_to_row,
+)
 
-J1939_FIELDS = ["protocol", "can_id", "pgn", "source_address", "destination_address", "payload_hex"]
+J1939_FIELDS = [
+    "protocol",
+    "can_id",
+    "pgn",
+    "source_address",
+    "destination_address",
+    "payload_hex",
+]
 ETHERNET_FIELDS = ["protocol", "host", "port", "payload_hex"]
 UDS_FIELDS = ["service_id", "did", "payload_hex", "status"]
 
@@ -39,7 +52,10 @@ def build_parser() -> argparse.ArgumentParser:
         subparser.add_argument("--output", type=Path, required=True)
         subparser.add_argument("--mode", choices=["simulate", "live"], default="simulate")
         subparser.add_argument("--source-address", default=f"0x{J1939_DEFAULT_SOURCE:02X}")
-        subparser.add_argument("--destination-address", default=f"0x{J1939_DEFAULT_DESTINATION:02X}")
+        subparser.add_argument(
+            "--destination-address",
+            default=f"0x{J1939_DEFAULT_DESTINATION:02X}",
+        )
         subparser.add_argument("--interface", default="can0")
         subparser.add_argument("--host", default=ETHERNET_DEFAULT_HOST)
         subparser.add_argument("--port", default=str(ETHERNET_DEFAULT_PORT))
@@ -59,8 +75,18 @@ def client_command(args: argparse.Namespace) -> int:
     else:
         messages = [uds_from_row(row) for row in read_rows(args.input)]
     if args.transport == "j1939":
-        source = parse_int(args.source_address, field="source_address", minimum=0, maximum=0xFF)
-        dest = parse_int(args.destination_address, field="destination_address", minimum=0, maximum=0xFF)
+        source = parse_int(
+            args.source_address,
+            field="source_address",
+            minimum=0,
+            maximum=0xFF,
+        )
+        dest = parse_int(
+            args.destination_address,
+            field="destination_address",
+            minimum=0,
+            maximum=0xFF,
+        )
         j1939_frames = [
             encode_j1939(message, source_address=source, destination_address=dest)
             for message in messages
@@ -68,7 +94,11 @@ def client_command(args: argparse.Namespace) -> int:
         if args.mode == "live":
             for j1939_frame in j1939_frames:
                 send_socketcan_raw(j1939_frame, args.interface)
-        write_rows(args.output, (j1939_to_row(j1939_frame) for j1939_frame in j1939_frames), J1939_FIELDS)
+        write_rows(
+            args.output,
+            (j1939_to_row(j1939_frame) for j1939_frame in j1939_frames),
+            J1939_FIELDS,
+        )
         return 0
 
     port = parse_int(args.port, field="port", minimum=1, maximum=65535)

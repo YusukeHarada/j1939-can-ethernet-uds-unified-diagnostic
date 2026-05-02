@@ -68,7 +68,9 @@ class UdsMessage:
 
     def validate_client_request(self) -> None:
         if self.service_id not in CLIENT_SERVICE_IDS:
-            raise DiagnosticError(f"service_id is not a supported UDS client request: 0x{self.service_id:02X}")
+            raise DiagnosticError(
+                f"service_id is not a supported UDS client request: 0x{self.service_id:02X}"
+            )
 
 
 def parse_int(text: str, *, field: str, minimum: int, maximum: int) -> int:
