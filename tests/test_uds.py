@@ -5,6 +5,9 @@ import pytest
 from udsdiag.uds import (
     DiagnosticError,
     UdsMessage,
+    build_negative_response,
+    build_positive_response,
+    build_server_response,
     format_hex_bytes,
     parse_hex_bytes,
     parse_int,
@@ -49,6 +52,28 @@ def test_validate_client_request() -> None:
 
     with pytest.raises(DiagnosticError, match="not a supported UDS client request"):
         UdsMessage(service_id=0x7F, did=None, payload=b"\x22\x31").validate_client_request()
+
+
+def test_build_positive_response() -> None:
+    request = UdsMessage(service_id=0x22, did=0xF190, payload=b"")
+
+    response = build_positive_response(request, response_payload=b"\x12\x34")
+
+    assert response == UdsMessage(service_id=0x62, did=0xF190, payload=b"\x12\x34")
+    assert response.status() == "positive_response"
+
+
+def test_build_server_response_uses_negative_response_for_non_client_request() -> None:
+    request = UdsMessage(service_id=0x62, did=0xF190, payload=b"\x12\x34")
+
+    response = build_server_response(request, negative_response_code=0x12)
+
+    assert response == UdsMessage(service_id=0x7F, did=None, payload=b"\x62\x12")
+
+
+def test_build_negative_response_rejects_invalid_response_code() -> None:
+    with pytest.raises(DiagnosticError, match="negative response code out of range"):
+        build_negative_response(UdsMessage(service_id=0x22, did=None, payload=b""), 0x100)
 
 
 def test_uds_from_row_accepts_missing_payload() -> None:

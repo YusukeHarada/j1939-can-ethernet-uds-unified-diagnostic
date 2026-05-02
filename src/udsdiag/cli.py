@@ -24,6 +24,8 @@ from udsdiag.transport import (
 from udsdiag.uds import (
     DiagnosticError,
     UdsMessage,
+    build_server_response,
+    parse_hex_bytes,
     parse_int,
     uds_from_row,
     uds_to_row,
@@ -45,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="udsdiag")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    for command in ("client", "send", "receive"):
+    for command in ("client", "server", "send", "receive"):
         subparser = subparsers.add_parser(command)
         subparser.add_argument("--transport", choices=["j1939", "ethernet"], required=True)
         subparser.add_argument("--input", type=Path, required=True)
@@ -59,6 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
         subparser.add_argument("--interface", default="can0")
         subparser.add_argument("--host", default=ETHERNET_DEFAULT_HOST)
         subparser.add_argument("--port", default=str(ETHERNET_DEFAULT_PORT))
+        subparser.add_argument("--response-payload", default="")
+        subparser.add_argument("--negative-response-code", default="0x11")
     return parser
 
 
@@ -124,9 +128,69 @@ def receive_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def server_command(args: argparse.Namespace) -> int:
+    response_payload = parse_hex_bytes(args.response_payload)
+    negative_response_code = parse_int(
+        args.negative_response_code,
+        field="negative_response_code",
+        minimum=0,
+        maximum=0xFF,
+    )
+    input_rows = read_rows(args.input)
+    if args.transport == "j1939":
+        j1939_request_frames = [j1939_from_row(row) for row in input_rows]
+        j1939_response_frames = []
+        for request_frame in j1939_request_frames:
+            request = decode_j1939(request_frame)
+            response = build_server_response(
+                request,
+                response_payload=response_payload,
+                negative_response_code=negative_response_code,
+            )
+            j1939_response_frames.append(
+                encode_j1939(
+                    response,
+                    source_address=request_frame.destination_address,
+                    destination_address=request_frame.source_address,
+                )
+            )
+        if args.mode == "live":
+            for response_frame in j1939_response_frames:
+                send_socketcan_raw(response_frame, args.interface)
+        write_rows(
+            args.output,
+            (j1939_to_row(response_frame) for response_frame in j1939_response_frames),
+            J1939_FIELDS,
+        )
+        return 0
+
+    ethernet_request_frames = [ethernet_from_row(row) for row in input_rows]
+    port = parse_int(args.port, field="port", minimum=1, maximum=65535)
+    ethernet_response_frames = []
+    for ethernet_request_frame in ethernet_request_frames:
+        request = decode_ethernet(ethernet_request_frame)
+        response = build_server_response(
+            request,
+            response_payload=response_payload,
+            negative_response_code=negative_response_code,
+        )
+        ethernet_response_frames.append(encode_ethernet(response, host=args.host, port=port))
+    if args.mode == "live":
+        for ethernet_response_frame in ethernet_response_frames:
+            send_ethernet_udp(ethernet_response_frame)
+    write_rows(
+        args.output,
+        (ethernet_to_row(response_frame) for response_frame in ethernet_response_frames),
+        ETHERNET_FIELDS,
+    )
+    return 0
+
+
 def run(args: argparse.Namespace) -> int:
     if args.command in {"client", "send"}:
         return client_command(args)
+    if args.command == "server":
+        return server_command(args)
     if args.command == "receive":
         return receive_command(args)
     raise DiagnosticError(f"unknown command: {args.command}")

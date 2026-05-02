@@ -82,6 +82,182 @@ def test_cli_client_rejects_non_client_service_id(
     assert "not a supported UDS client request" in capsys.readouterr().err
 
 
+def test_cli_server_j1939_generates_response_frames(tmp_path: Path) -> None:
+    requests = tmp_path / "requests.csv"
+    responses = tmp_path / "responses.csv"
+    requests.write_text(
+        "protocol,can_id,pgn,source_address,destination_address,payload_hex\n"
+        "j1939,0x18DADAF9,0xDADA,0xF9,0xDA,22 F1 90\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "server",
+                "--transport",
+                "j1939",
+                "--input",
+                str(requests),
+                "--output",
+                str(responses),
+                "--response-payload",
+                "12 34",
+            ]
+        )
+        == 0
+    )
+
+    response_rows = rows(responses)
+    assert response_rows == [
+        {
+            "protocol": "j1939",
+            "can_id": "0x18DAF9DA",
+            "pgn": "0xDAF9",
+            "source_address": "0xDA",
+            "destination_address": "0xF9",
+            "payload_hex": "62 F1 90 12 34",
+        }
+    ]
+
+
+def test_cli_server_ethernet_generates_negative_response(tmp_path: Path) -> None:
+    requests = tmp_path / "requests.csv"
+    responses = tmp_path / "responses.csv"
+    requests.write_text(
+        "protocol,host,port,payload_hex\n"
+        "ethernet,127.0.0.1,13400,62 F1 90 12 34\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "server",
+                "--transport",
+                "ethernet",
+                "--input",
+                str(requests),
+                "--output",
+                str(responses),
+                "--host",
+                "192.0.2.30",
+                "--port",
+                "13401",
+                "--negative-response-code",
+                "0x12",
+            ]
+        )
+        == 0
+    )
+
+    response_rows = rows(responses)
+    assert response_rows == [
+        {
+            "protocol": "ethernet",
+            "host": "192.0.2.30",
+            "port": "13401",
+            "payload_hex": "7F 62 12",
+        }
+    ]
+
+
+def test_cli_server_live_mode_calls_senders(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    j1939_requests = tmp_path / "j1939.csv"
+    ethernet_requests = tmp_path / "ethernet.csv"
+    j1939_responses = tmp_path / "j1939_responses.csv"
+    ethernet_responses = tmp_path / "ethernet_responses.csv"
+    j1939_requests.write_text(
+        "protocol,can_id,pgn,source_address,destination_address,payload_hex\n"
+        "j1939,0x18DADAF9,0xDADA,0xF9,0xDA,22 F1 90\n",
+        encoding="utf-8",
+    )
+    ethernet_requests.write_text(
+        "protocol,host,port,payload_hex\n"
+        "ethernet,127.0.0.1,13400,22 F1 90\n",
+        encoding="utf-8",
+    )
+    sent: list[str] = []
+
+    monkeypatch.setattr(
+        "udsdiag.cli.send_socketcan_raw",
+        lambda frame, interface: sent.append(interface),
+    )
+    monkeypatch.setattr("udsdiag.cli.send_ethernet_udp", lambda frame: sent.append(frame.host))
+
+    assert (
+        main(
+            [
+                "server",
+                "--transport",
+                "j1939",
+                "--input",
+                str(j1939_requests),
+                "--output",
+                str(j1939_responses),
+                "--mode",
+                "live",
+                "--interface",
+                "can2",
+            ]
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "server",
+                "--transport",
+                "ethernet",
+                "--input",
+                str(ethernet_requests),
+                "--output",
+                str(ethernet_responses),
+                "--mode",
+                "live",
+                "--host",
+                "192.0.2.40",
+            ]
+        )
+        == 0
+    )
+    assert sent == ["can2", "192.0.2.40"]
+
+
+def test_cli_server_rejects_invalid_negative_response_code(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    requests = tmp_path / "requests.csv"
+    responses = tmp_path / "responses.csv"
+    requests.write_text(
+        "protocol,host,port,payload_hex\n"
+        "ethernet,127.0.0.1,13400,22 F1 90\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "server",
+                "--transport",
+                "ethernet",
+                "--input",
+                str(requests),
+                "--output",
+                str(responses),
+                "--negative-response-code",
+                "0x100",
+            ]
+        )
+        == 1
+    )
+    assert "negative_response_code out of range" in capsys.readouterr().err
+
+
 def test_cli_send_receive_ethernet(tmp_path: Path) -> None:
     uds = tmp_path / "uds.csv"
     frames = tmp_path / "frames.csv"

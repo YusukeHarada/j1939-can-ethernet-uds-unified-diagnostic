@@ -38,6 +38,8 @@ CLIENT_SERVICE_IDS = frozenset(
     }
 )
 
+DEFAULT_NEGATIVE_RESPONSE_CODE = 0x11
+
 
 @dataclass(frozen=True)
 class UdsMessage:
@@ -71,6 +73,40 @@ class UdsMessage:
             raise DiagnosticError(
                 f"service_id is not a supported UDS client request: 0x{self.service_id:02X}"
             )
+
+
+def build_positive_response(request: UdsMessage, response_payload: bytes = b"") -> UdsMessage:
+    request.validate_client_request()
+    response_service_id = (request.service_id + 0x40) & 0xFF
+    return UdsMessage(
+        service_id=response_service_id,
+        did=request.did,
+        payload=response_payload,
+    )
+
+
+def build_negative_response(
+    request: UdsMessage,
+    response_code: int = DEFAULT_NEGATIVE_RESPONSE_CODE,
+) -> UdsMessage:
+    if response_code < 0 or response_code > 0xFF:
+        raise DiagnosticError(f"negative response code out of range: {response_code}")
+    return UdsMessage(
+        service_id=0x7F,
+        did=None,
+        payload=bytes([request.service_id, response_code]),
+    )
+
+
+def build_server_response(
+    request: UdsMessage,
+    *,
+    response_payload: bytes = b"",
+    negative_response_code: int = DEFAULT_NEGATIVE_RESPONSE_CODE,
+) -> UdsMessage:
+    if request.service_id in CLIENT_SERVICE_IDS:
+        return build_positive_response(request, response_payload=response_payload)
+    return build_negative_response(request, response_code=negative_response_code)
 
 
 def parse_int(text: str, *, field: str, minimum: int, maximum: int) -> int:

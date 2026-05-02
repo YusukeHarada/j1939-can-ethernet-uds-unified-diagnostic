@@ -2,13 +2,16 @@
 
 J1939(CAN) または Ethernet 上で UDS(Unified Diagnostic Services) Client の request を扱う Python CLI です。
 検証・CI では CSV 入出力のシミュレーションとして request をフレーム化し、実機では生成済みフレームを UDP または SocketCAN raw CAN に送信できます。
+Server 側シミュレーションでは request フレーム CSV から response フレーム CSV を生成できます。
 
 ## 使い方
 
 ```bash
 python -m udsdiag client --transport j1939 --input data/normal_uds.csv --output out_j1939.csv
+python -m udsdiag server --transport j1939 --input out_j1939.csv --output response_j1939.csv
 
 python -m udsdiag client --transport ethernet --input data/normal_uds.csv --output out_eth.csv
+python -m udsdiag server --transport ethernet --input out_eth.csv --output response_eth.csv
 ```
 
 Client 実機送信例:
@@ -23,6 +26,14 @@ python -m udsdiag client --transport j1939 --input data/normal_uds.csv --output 
 
 互換性のため `send` / `receive` コマンドも残していますが、UDS の役割としては `client` を使用します。
 `client` は UDS Client request として定義されている Service ID のみを受け付け、negative response などの Server 側データは入力エラーにします。
+`server` は受け取った request に対して positive response を生成します。未対応の Service ID は negative response `0x7F` に変換します。
+
+Server response の payload を指定する例:
+
+```bash
+python -m udsdiag server --transport j1939 --input out_j1939.csv --output response_j1939.csv \
+  --response-payload "12 34"
+```
 
 ## CSV
 
