@@ -6,21 +6,23 @@ Server 側シミュレーションでは request フレーム CSV から respons
 
 ## 使い方
 
-```bash
-python -m udsdiag client --transport j1939 --input data/normal_uds.csv --output out_j1939.csv
-python -m udsdiag server --transport j1939 --input out_j1939.csv --output response_j1939.csv
+リポジトリ直下で、インストールせずに Python ファイル名で実行できます。
 
-python -m udsdiag client --transport ethernet --input data/normal_uds.csv --output out_eth.csv
-python -m udsdiag server --transport ethernet --input out_eth.csv --output response_eth.csv
+```bash
+python run_udsdiag.py client --transport j1939 --input data/normal_uds.csv --output out_j1939.csv
+python run_udsdiag.py server --transport j1939 --input out_j1939.csv --output response_j1939.csv
+
+python run_udsdiag.py client --transport ethernet --input data/normal_uds.csv --output out_eth.csv
+python run_udsdiag.py server --transport ethernet --input out_eth.csv --output response_eth.csv
 ```
 
 Client 実機送信例:
 
 ```bash
-python -m udsdiag client --transport ethernet --input data/normal_uds.csv --output out_eth.csv \
+python run_udsdiag.py client --transport ethernet --input data/normal_uds.csv --output out_eth.csv \
   --mode live --host 192.0.2.10 --port 13400
 
-python -m udsdiag client --transport j1939 --input data/normal_uds.csv --output out_j1939.csv \
+python run_udsdiag.py client --transport j1939 --input data/normal_uds.csv --output out_j1939.csv \
   --mode live --interface can0
 ```
 
@@ -31,7 +33,7 @@ python -m udsdiag client --transport j1939 --input data/normal_uds.csv --output 
 Server response の payload を指定する例:
 
 ```bash
-python -m udsdiag server --transport j1939 --input out_j1939.csv --output response_j1939.csv \
+python run_udsdiag.py server --transport j1939 --input out_j1939.csv --output response_j1939.csv \
   --response-payload "12 34"
 ```
 
