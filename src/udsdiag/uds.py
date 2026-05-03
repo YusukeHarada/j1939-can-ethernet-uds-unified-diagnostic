@@ -40,6 +40,68 @@ CLIENT_SERVICE_IDS = frozenset(
 
 DEFAULT_NEGATIVE_RESPONSE_CODE = 0x11
 
+# SIDs that require a sub-function byte (carried in payload[0])
+_SUBFUNC_REQUIRED: frozenset[int] = frozenset(
+    {0x10, 0x11, 0x19, 0x27, 0x28, 0x2A, 0x2C, 0x2F, 0x31, 0x3E, 0x85, 0x86, 0x87}
+)
+
+# Valid sub-function ranges per SID (inclusive).  None means any non-zero value.
+_SUBFUNC_RANGES: dict[int, tuple[int, int]] = {
+    0x10: (0x01, 0x7F),  # DiagnosticSessionControl
+    0x11: (0x01, 0x03),  # ECUReset: hardReset / keyOffOnReset / softReset
+    0x19: (0x01, 0x19),  # ReadDTCInformation sub-functions
+    0x27: (0x01, 0x7E),  # SecurityAccess: seed (odd) / key (even)
+    0x28: (0x00, 0x03),  # CommunicationControl
+    0x2A: (0x01, 0x04),  # ReadDataByPeriodicIdentifier: rate
+    0x2C: (0x01, 0x03),  # DynamicallyDefineDataIdentifier
+    0x2F: (0x00, 0x0F),  # InputOutputControlByIdentifier: control parameter
+    0x31: (0x01, 0x03),  # RoutineControl: start/stop/result
+    0x3E: (0x00, 0x01),  # TesterPresent: 0x00 = respond, 0x01 = no response
+    0x85: (0x01, 0x02),  # ControlDTCSetting: on / off
+    0x86: (0x01, 0x06),  # ResponseOnEvent
+    0x87: (0x01, 0x03),  # LinkControl
+}
+
+# SIDs that require a DID (2-byte data identifier)
+_DID_REQUIRED: frozenset[int] = frozenset({0x22, 0x24, 0x2E, 0x2F})
+
+# SIDs that require a non-empty payload (beyond SID + DID)
+_PAYLOAD_REQUIRED: frozenset[int] = frozenset(
+    {0x2E, 0x34, 0x35, 0x36, 0x3D, 0x84}
+)
+
+
+def _validate_sid_fields(message: UdsMessage) -> None:
+    """Validate sub-function, DID, and payload requirements per SID."""
+    sid = message.service_id
+
+    # --- sub-function check ---
+    if sid in _SUBFUNC_REQUIRED:
+        if not message.payload:
+            raise DiagnosticError(
+                f"service 0x{sid:02X} requires a sub-function byte in payload"
+            )
+        sf = message.payload[0]
+        if sid in _SUBFUNC_RANGES:  # pragma: no branch
+            lo, hi = _SUBFUNC_RANGES[sid]
+            if not (lo <= sf <= hi):
+                raise DiagnosticError(
+                    f"service 0x{sid:02X} sub-function 0x{sf:02X} out of valid range "
+                    f"[0x{lo:02X}, 0x{hi:02X}]"
+                )
+
+    # --- DID check ---
+    if sid in _DID_REQUIRED and message.did is None:
+        raise DiagnosticError(
+            f"service 0x{sid:02X} requires a DID (data identifier)"
+        )
+
+    # --- payload check ---
+    if sid in _PAYLOAD_REQUIRED and not message.payload:
+        raise DiagnosticError(
+            f"service 0x{sid:02X} requires a non-empty payload"
+        )
+
 
 @dataclass(frozen=True)
 class UdsMessage:
@@ -73,6 +135,7 @@ class UdsMessage:
             raise DiagnosticError(
                 f"service_id is not a supported UDS client request: 0x{self.service_id:02X}"
             )
+        _validate_sid_fields(self)
 
 
 def build_positive_response(request: UdsMessage, response_payload: bytes = b"") -> UdsMessage:

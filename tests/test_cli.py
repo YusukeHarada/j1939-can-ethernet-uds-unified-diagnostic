@@ -480,10 +480,13 @@ def test_cli_live_mode_calls_senders(tmp_path: Path, monkeypatch: pytest.MonkeyP
     write_uds(uds)
     sent: list[str] = []
 
-    monkeypatch.setattr(
-        "udsdiag.cli.send_socketcan_raw",
-        lambda frame, interface: sent.append(interface),
-    )
+    def fake_exchange_socketcan(
+        frame: object, interface: str, response_can_id: int, timeout: float
+    ) -> bytes:
+        sent.append(interface)
+        return b"\x62\xf1\x90"
+
+    monkeypatch.setattr("udsdiag.cli.exchange_socketcan", fake_exchange_socketcan)
 
     def exchange_response(frame: EthernetFrame, timeout: float) -> bytes:
         sent.append(frame.host)
@@ -505,6 +508,8 @@ def test_cli_live_mode_calls_senders(tmp_path: Path, monkeypatch: pytest.MonkeyP
                 "live",
                 "--interface",
                 "can1",
+                "--response-can-id",
+                "0x7E8",
             ]
         )
         == 0
@@ -556,3 +561,62 @@ def test_cli_returns_error_for_invalid_csv(
 def test_run_rejects_unknown_command() -> None:
     with pytest.raises(DiagnosticError, match="unknown command"):
         run(Namespace(command="other"))
+
+
+def test_cli_client_live_doip_calls_exchange_doip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    uds = tmp_path / "uds.csv"
+    output = tmp_path / "out.csv"
+    uds.write_text("service_id,did,payload_hex\n0x22,0xF190,\n", encoding="utf-8")
+    called: list[tuple[int, int]] = []
+
+    def fake_exchange_doip(
+        frame: object, source_address: int, target_address: int, timeout: float
+    ) -> bytes:
+        called.append((source_address, target_address))
+        return b"\x62\xf1\x90\xAB\xCD"
+
+    monkeypatch.setattr("udsdiag.cli.exchange_doip", fake_exchange_doip)
+
+    assert (
+        main(
+            [
+                "client",
+                "--transport", "ethernet",
+                "--input", str(uds),
+                "--output", str(output),
+                "--mode", "live",
+                "--doip",
+                "--doip-source-address", "0x0E00",
+                "--doip-target-address", "0x0001",
+            ]
+        )
+        == 0
+    )
+    assert called == [(0x0E00, 0x0001)]
+    assert rows(output)[0]["payload_hex"] == "62 F1 90 AB CD"
+
+
+def test_cli_client_j1939_live_requires_response_can_id(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    uds = tmp_path / "uds.csv"
+    output = tmp_path / "out.csv"
+    uds.write_text("service_id,did,payload_hex\n0x22,0xF190,\n", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "client",
+                "--transport", "j1939",
+                "--input", str(uds),
+                "--output", str(output),
+                "--mode", "live",
+                "--interface", "can0",
+                # --response-can-id intentionally omitted
+            ]
+        )
+        == 1
+    )
+    assert "--response-can-id is required" in capsys.readouterr().err

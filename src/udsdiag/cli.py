@@ -7,7 +7,9 @@ from pathlib import Path
 
 from udsdiag.csvio import read_rows, write_rows
 from udsdiag.live import (
+    exchange_doip,
     exchange_ethernet_udp,
+    exchange_socketcan,
     send_ethernet_udp,
     send_socketcan_raw,
     serve_ethernet_udp,
@@ -17,6 +19,8 @@ from udsdiag.transport import (
     ETHERNET_DEFAULT_PORT,
     J1939_DEFAULT_DESTINATION,
     J1939_DEFAULT_SOURCE,
+    EthernetFrame,
+    J1939Frame,
     decode_ethernet,
     decode_j1939,
     encode_ethernet,
@@ -64,8 +68,13 @@ def build_parser() -> argparse.ArgumentParser:
             default=f"0x{J1939_DEFAULT_DESTINATION:02X}",
         )
         subparser.add_argument("--interface", default="can0")
+        subparser.add_argument("--response-can-id", default="")
         subparser.add_argument("--host", default=ETHERNET_DEFAULT_HOST)
         subparser.add_argument("--port", default=str(ETHERNET_DEFAULT_PORT))
+        subparser.add_argument("--doip", action="store_true",
+                               help="Use DoIP (ISO 13400-2) TCP instead of UDP")
+        subparser.add_argument("--doip-source-address", default="0x0E00")
+        subparser.add_argument("--doip-target-address", default="0x0001")
         subparser.add_argument("--response-payload", default="")
         subparser.add_argument("--negative-response-code", default="0x11")
         subparser.add_argument("--timeout", default="1.0")
@@ -110,8 +119,36 @@ def client_command(args: argparse.Namespace) -> int:
             for message in messages
         ]
         if args.mode == "live":
+            resp_can_id_str = getattr(args, "response_can_id", "")
+            if not resp_can_id_str.strip():
+                raise DiagnosticError(
+                    "--response-can-id is required for J1939 live mode"
+                )
+            resp_can_id = parse_int(
+                resp_can_id_str,
+                field="response_can_id",
+                minimum=0,
+                maximum=0x1FFFFFFF,
+            )
+            timeout = parse_timeout(args.timeout)
+            j1939_response_frames: list[J1939Frame] = []
             for j1939_frame in j1939_frames:
-                send_socketcan_raw(j1939_frame, args.interface)
+                resp_payload = exchange_socketcan(
+                    j1939_frame, args.interface, resp_can_id, timeout
+                )
+                j1939_response_frames.append(
+                    encode_j1939(
+                        UdsMessage.from_payload(resp_payload),
+                        source_address=dest,
+                        destination_address=source,
+                    )
+                )
+            write_rows(
+                args.output,
+                (j1939_to_row(f) for f in j1939_response_frames),
+                J1939_FIELDS,
+            )
+            return 0
         write_rows(
             args.output,
             (j1939_to_row(j1939_frame) for j1939_frame in j1939_frames),
@@ -121,12 +158,29 @@ def client_command(args: argparse.Namespace) -> int:
 
     port = parse_int(args.port, field="port", minimum=1, maximum=65535)
     ethernet_frames = [encode_ethernet(message, host=args.host, port=port) for message in messages]
-    output_frames = ethernet_frames
+    output_frames: list[EthernetFrame] = list(ethernet_frames)
     if args.mode == "live":
         timeout = parse_timeout(args.timeout)
-        response_frames = []
+        response_frames: list[EthernetFrame] = []
         for ethernet_frame in ethernet_frames:
-            response_payload = exchange_ethernet_udp(ethernet_frame, timeout)
+            if getattr(args, "doip", False):
+                src_la = parse_int(
+                    args.doip_source_address,
+                    field="doip_source_address",
+                    minimum=0,
+                    maximum=0xFFFF,
+                )
+                tgt_la = parse_int(
+                    args.doip_target_address,
+                    field="doip_target_address",
+                    minimum=0,
+                    maximum=0xFFFF,
+                )
+                response_payload = exchange_doip(
+                    ethernet_frame, src_la, tgt_la, timeout
+                )
+            else:
+                response_payload = exchange_ethernet_udp(ethernet_frame, timeout)
             response_frames.append(
                 encode_ethernet(
                     UdsMessage.from_payload(response_payload),
