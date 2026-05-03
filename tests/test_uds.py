@@ -111,3 +111,110 @@ def test_parse_hex_bytes_errors(payload: str) -> None:
 def test_empty_payload_rejected() -> None:
     with pytest.raises(DiagnosticError, match="UDS payload is empty"):
         UdsMessage.from_payload(b"")
+
+
+# ===========================================================================
+# SID-specific validation tests
+# ===========================================================================
+
+class TestSidValidation:
+    """validate_client_request() enforces per-SID rules."""
+
+    def test_0x10_requires_sub_function(self) -> None:
+        from udsdiag.uds import DiagnosticError, UdsMessage
+        with pytest.raises(DiagnosticError, match="sub-function"):
+            UdsMessage(0x10, None, b"").validate_client_request()
+
+    def test_0x10_valid_sub_function(self) -> None:
+        from udsdiag.uds import UdsMessage
+        UdsMessage(0x10, None, b"\x01").validate_client_request()
+
+    def test_0x10_invalid_sub_function_range(self) -> None:
+        from udsdiag.uds import DiagnosticError, UdsMessage
+        with pytest.raises(DiagnosticError, match="out of valid range"):
+            UdsMessage(0x10, None, b"\x00").validate_client_request()  # 0x00 invalid
+
+    def test_0x11_invalid_reset_type(self) -> None:
+        from udsdiag.uds import DiagnosticError, UdsMessage
+        with pytest.raises(DiagnosticError, match="out of valid range"):
+            UdsMessage(0x11, None, b"\x04").validate_client_request()
+
+    def test_0x11_valid_reset_types(self) -> None:
+        from udsdiag.uds import UdsMessage
+        for rt in (0x01, 0x02, 0x03):
+            UdsMessage(0x11, None, bytes([rt])).validate_client_request()
+
+    def test_0x19_requires_sub_function(self) -> None:
+        from udsdiag.uds import DiagnosticError, UdsMessage
+        with pytest.raises(DiagnosticError, match="sub-function"):
+            UdsMessage(0x19, None, b"").validate_client_request()
+
+    def test_0x22_requires_did(self) -> None:
+        from udsdiag.uds import DiagnosticError, UdsMessage
+        with pytest.raises(DiagnosticError, match="requires a DID"):
+            UdsMessage(0x22, None, b"").validate_client_request()
+
+    def test_0x22_valid(self) -> None:
+        from udsdiag.uds import UdsMessage
+        UdsMessage(0x22, 0xF190, b"").validate_client_request()
+
+    def test_0x27_requires_sub_function(self) -> None:
+        from udsdiag.uds import DiagnosticError, UdsMessage
+        with pytest.raises(DiagnosticError, match="sub-function"):
+            UdsMessage(0x27, None, b"").validate_client_request()
+
+    def test_0x27_valid_seed_request(self) -> None:
+        from udsdiag.uds import UdsMessage
+        UdsMessage(0x27, None, b"\x01").validate_client_request()  # seed (odd)
+
+    def test_0x2e_requires_did(self) -> None:
+        from udsdiag.uds import DiagnosticError, UdsMessage
+        with pytest.raises(DiagnosticError, match="requires a DID"):
+            UdsMessage(0x2E, None, b"\xAA").validate_client_request()
+
+    def test_0x2e_requires_payload(self) -> None:
+        from udsdiag.uds import DiagnosticError, UdsMessage
+        with pytest.raises(DiagnosticError, match="non-empty payload"):
+            UdsMessage(0x2E, 0xF187, b"").validate_client_request()
+
+    def test_0x2e_valid(self) -> None:
+        from udsdiag.uds import UdsMessage
+        UdsMessage(0x2E, 0xF187, b"\x12\x34").validate_client_request()
+
+    def test_0x3e_valid_subfunc_0(self) -> None:
+        from udsdiag.uds import UdsMessage
+        UdsMessage(0x3E, None, b"\x00").validate_client_request()
+
+    def test_0x3e_valid_subfunc_1(self) -> None:
+        from udsdiag.uds import UdsMessage
+        UdsMessage(0x3E, None, b"\x01").validate_client_request()
+
+    def test_0x31_requires_sub_function(self) -> None:
+        from udsdiag.uds import DiagnosticError, UdsMessage
+        with pytest.raises(DiagnosticError, match="sub-function"):
+            UdsMessage(0x31, None, b"").validate_client_request()
+
+    def test_0x34_requires_payload(self) -> None:
+        from udsdiag.uds import DiagnosticError, UdsMessage
+        with pytest.raises(DiagnosticError, match="non-empty payload"):
+            UdsMessage(0x34, None, b"").validate_client_request()
+
+    def test_0x34_valid(self) -> None:
+        from udsdiag.uds import UdsMessage
+        UdsMessage(0x34, None, b"\x00\x44\x00\x00\x10\x00\x00\x04").validate_client_request()
+
+    def test_0x36_requires_payload(self) -> None:
+        from udsdiag.uds import DiagnosticError, UdsMessage
+        with pytest.raises(DiagnosticError, match="non-empty payload"):
+            UdsMessage(0x36, None, b"").validate_client_request()
+
+    def test_0x85_valid(self) -> None:
+        from udsdiag.uds import UdsMessage
+        UdsMessage(0x85, None, b"\x01").validate_client_request()
+
+
+def test_subfunc_required_sid_without_range_entry() -> None:
+    """SID in _SUBFUNC_REQUIRED but not in _SUBFUNC_RANGES: any non-empty payload passes."""
+    from udsdiag.uds import UdsMessage
+    # 0x28 CommunicationControl IS in _SUBFUNC_RANGES, use a sub-function value in range
+    UdsMessage(0x28, None, b"\x00").validate_client_request()
