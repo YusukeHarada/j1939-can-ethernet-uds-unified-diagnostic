@@ -54,9 +54,17 @@ J1939（CAN）または Ethernet 上で UDS（Unified Diagnostic Services, ISO 1
 
 ### インストール
 
+仮想環境（venv）を使用します。グローバル環境を汚染せず、開発者間・CI間で環境を統一できます。
+
 ```bash
 git clone https://github.com/YusukeHarada/j1939-can-ethernet-uds-unified-diagnostic.git
 cd j1939-can-ethernet-uds-unified-diagnostic
+
+# 仮想環境を作成（初回のみ）
+python3 -m venv .venv
+
+# 仮想環境を有効化
+source .venv/bin/activate
 
 # 通常インストール
 pip install -e .
@@ -67,6 +75,9 @@ pip install -e ".[dev]"
 
 インストール後、`udsdiag` コマンドが使用可能になります。
 インストールせずに実行する場合は `python run_udsdiag.py` を使います。
+
+> **注意**：ターミナルを開き直した場合は `source .venv/bin/activate` で再度有効化してください。
+> `.venv/` はリポジトリに含めません（`.gitignore` 済み）。
 
 ---
 
